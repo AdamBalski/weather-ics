@@ -1,0 +1,104 @@
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sqlite3
+
+from .config import DB_PATH, LOCATION_ID
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def connect() -> sqlite3.Connection:
+    path = Path(DB_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path, timeout=30)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def initialize_db() -> None:
+    with connect() as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS hourly_forecasts (
+                id INTEGER PRIMARY KEY,
+                location TEXT NOT NULL,
+                issued_at TEXT NOT NULL,
+                valid_at TEXT NOT NULL,
+                valid_end TEXT NOT NULL,
+                temperature_c REAL,
+                precipitation_probability REAL,
+                precipitation_mm REAL,
+                cloud_cover INTEGER,
+                condition_type TEXT,
+                condition_text TEXT,
+                is_daytime INTEGER,
+                UNIQUE(location, issued_at, valid_at)
+            );
+            CREATE INDEX IF NOT EXISTS hourly_valid_idx
+                ON hourly_forecasts(location, valid_at, issued_at);
+            CREATE TABLE IF NOT EXISTS daily_forecasts (
+                id INTEGER PRIMARY KEY,
+                location TEXT NOT NULL,
+                issued_at TEXT NOT NULL,
+                local_date TEXT NOT NULL,
+                time_zone TEXT,
+                low_c REAL,
+                high_c REAL,
+                UNIQUE(location, issued_at, local_date)
+            );
+            CREATE INDEX IF NOT EXISTS daily_date_idx
+                ON daily_forecasts(location, local_date, issued_at);
+            """
+        )
+        # Keep existing Compose volumes usable when upgrading from the first schema.
+        daily_columns = {row["name"] for row in db.execute("PRAGMA table_info(daily_forecasts)")}
+        if "time_zone" not in daily_columns:
+            db.execute("ALTER TABLE daily_forecasts ADD COLUMN time_zone TEXT")
+
+
+def cleanup() -> None:
+    now = now_utc()
+    lower = iso_utc(now - timedelta(hours=72))
+    upper = iso_utc(now + timedelta(hours=240))
+    lower_day = (now - timedelta(hours=72)).date().isoformat()
+    upper_day = (now + timedelta(hours=240)).date().isoformat()
+    with connect() as db:
+        db.execute(
+            "DELETE FROM hourly_forecasts WHERE location=? AND (valid_at < ? OR valid_at > ?)",
+            (LOCATION_ID, lower, upper),
+        )
+        db.execute(
+            "DELETE FROM daily_forecasts WHERE location=? AND (local_date < ? OR local_date > ?)",
+            (LOCATION_ID, lower_day, upper_day),
+        )
+
+
+def latest_hourly(lower: str, upper: str) -> list[sqlite3.Row]:
+    with connect() as db:
+        return db.execute(
+            """SELECT h.* FROM hourly_forecasts h
+               JOIN (SELECT valid_at, MAX(issued_at) AS newest FROM hourly_forecasts
+                     WHERE location=? AND valid_at >= ? AND valid_at <= ? GROUP BY valid_at) latest
+                 ON h.valid_at=latest.valid_at AND h.issued_at=latest.newest
+               WHERE h.location=? ORDER BY h.valid_at""",
+            (LOCATION_ID, lower, upper, LOCATION_ID),
+        ).fetchall()
+
+
+def latest_daily() -> list[sqlite3.Row]:
+    with connect() as db:
+        return db.execute(
+            """SELECT d.* FROM daily_forecasts d JOIN
+               (SELECT local_date, MAX(issued_at) AS newest FROM daily_forecasts
+                WHERE location=? GROUP BY local_date) latest
+               ON d.local_date=latest.local_date AND d.issued_at=latest.newest
+               WHERE d.location=?""",
+            (LOCATION_ID, LOCATION_ID),
+        ).fetchall()

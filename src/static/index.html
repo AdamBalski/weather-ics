@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Weather Calendar Feed</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 800px;
+      margin: auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #111;
+    }
+    h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.35rem; margin: 1.5rem 0 .5rem; }
+    label { display: block; font-weight: bold; margin: .75rem 0 .25rem; }
+    select, input {
+      width: 100%;
+      padding: .6rem;
+      font: inherit;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+    }
+    input[readonly] { background: #f9f9f9; }
+    .feed-section {
+      margin: 1.5rem 0;
+      padding: 1rem;
+      border: 1px solid #eee;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+    .feed-pair {
+      margin: .75rem 0;
+      padding: 1rem;
+      border: 1px dashed #ccc;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .feed-pair label { margin-top: 0; }
+    .feed-pair p { margin: 0 0 .35rem; color: #555; }
+    .feed-row { display: flex; gap: .5rem; }
+    .feed-row input { min-width: 0; }
+    button {
+      padding: .5rem 1rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+      background: black;
+      color: white;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:hover { background: #444; }
+    button.secondary {
+      background: #f0f0f0;
+      color: #111;
+      border: 1px solid #ccc;
+    }
+    button.secondary:hover { background: #dedede; }
+    .help { color: #555; font-size: .95rem; }
+    #copyStatus { min-height: 1.5rem; color: #276738; }
+    footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #eee; color: #666; }
+    @media (max-width: 560px) {
+      body { padding: 1.25rem; }
+      h1 { font-size: 2rem; }
+      .feed-row { flex-direction: column; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Weather Calendar Feed</h1>
+  <p>Subscribe to a calendar with one all-day weather event per date for this service’s configured location. Each event shows the temperature range and daytime rain risk, with hourly details in its description.</p>
+
+  <label for="timezone">Timezone</label>
+  <select id="timezone">
+    <option value="UTC" selected>UTC</option>
+  </select>
+  <p class="help">Choose from the supported IANA timezones. Dates and times follow daylight-saving changes.</p>
+
+  <div class="feed-section">
+    <h2>Calendar feed URLs</h2>
+    <p>Copy a URL and add it to your calendar app as a subscription.</p>
+
+    <div class="feed-pair">
+      <label for="rawUrl">Standard feed</label>
+      <p>Recommended for broad calendar compatibility.</p>
+      <div class="feed-row">
+        <input type="text" id="rawUrl" readonly aria-label="Standard calendar feed URL">
+        <button type="button" data-copy="rawUrl">Copy URL</button>
+      </div>
+    </div>
+
+    <div class="feed-pair">
+      <label for="htmlUrl">HTML description feed</label>
+      <p>Uses an HTML table for hourly details.</p>
+      <div class="feed-row">
+        <input type="text" id="htmlUrl" readonly aria-label="HTML calendar feed URL">
+        <button class="secondary" type="button" data-copy="htmlUrl">Copy URL</button>
+      </div>
+    </div>
+    <p id="copyStatus" role="status" aria-live="polite"></p>
+  </div>
+
+  <p class="help">Forecasts refresh every four hours. Weather data from Google.</p>
+
+  <script>
+    const timezone = document.getElementById("timezone");
+    const rawUrl = document.getElementById("rawUrl");
+    const htmlUrl = document.getElementById("htmlUrl");
+
+    async function loadTimezones() {
+      try {
+        const response = await fetch("./supportedTimezones");
+        if (!response.ok) throw new Error("Timezone list unavailable");
+        const names = await response.json();
+        timezone.replaceChildren(...names.map((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          return option;
+        }));
+        timezone.value = "UTC";
+      } catch (_) {
+        // Keep the UTC option already present in the static page.
+      }
+      updateFeedUrls();
+    }
+
+    function updateFeedUrls() {
+      const raw = new URL("./calendar.ics", window.location.href);
+      raw.searchParams.set("tz", timezone.value);
+      const html = new URL(raw);
+      html.searchParams.set("format", "html");
+      rawUrl.value = raw.href;
+      htmlUrl.value = html.href;
+    }
+
+    async function copyUrl(button) {
+      const input = document.getElementById(button.dataset.copy);
+      const status = document.getElementById("copyStatus");
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(input.value);
+        } else {
+          input.focus();
+          input.select();
+          if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
+          input.setSelectionRange(0, 0);
+        }
+        status.textContent = "Feed URL copied to clipboard.";
+      } catch (_) {
+        status.textContent = "Copy failed. Select and copy the URL from the text box.";
+      }
+    }
+
+    timezone.addEventListener("change", updateFeedUrls);
+    document.querySelectorAll("[data-copy]").forEach((button) => {
+      button.addEventListener("click", () => copyUrl(button));
+    });
+    updateFeedUrls();
+    loadTimezones();
+  </script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Trust deploy host key
+        env:
+          DEPLOY_HOST: ${{ secrets.REMOTE_HOST }}
+          DEPLOY_PORT: ${{ secrets.REMOTE_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy with Docker Compose
+        env:
+          DEPLOY_HOST: ${{ secrets.REMOTE_HOST }}
+          DEPLOY_PORT: ${{ secrets.REMOTE_PORT }}
+          DEPLOY_USER: ${{ secrets.REMOTE_USERNAME }}
+          SHA: ${{ github.sha }}
+          GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
+        run: |
+          : "${GOOGLE_WEATHER_API_KEY:?Set repository secret GOOGLE_WEATHER_API_KEY}"
+          {
+            printf 'GOOGLE_WEATHER_API_KEY=%q\n' "$GOOGLE_WEATHER_API_KEY"
+            cat <<'REMOTE'
+          export GOOGLE_WEATHER_API_KEY
+          set -euo pipefail
+          versions_file="/home/${DEPLOY_USER}/infra/compose/versions/weather-ics"
+          compose_file="/home/${DEPLOY_USER}/infra/compose/weather-ics.yml"
+          mkdir -p "$(dirname "$versions_file")"
+          touch "$versions_file"
+          grep -v '^WEATHER_ICS_VERSION=' "$versions_file" > "$versions_file.tmp" || true
+          printf 'WEATHER_ICS_VERSION=%s\n' "$DEPLOY_SHA" >> "$versions_file.tmp"
+          mv "$versions_file.tmp" "$versions_file"
+          set -a
+          . "$versions_file"
+          set +a
+          docker compose -f "$compose_file" up -d --wait
+          REMOTE
+          } | ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "DEPLOY_SHA=${SHA} DEPLOY_USER=${DEPLOY_USER} bash -s"
