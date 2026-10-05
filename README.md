@@ -4,16 +4,16 @@ A small SQLite-backed service that publishes one all-day weather event per local
 
 ## Run with Docker Compose
 
-Enable the Weather API and create an API key in Google Cloud. Export the key in the shell where Compose will run, then start the service:
+Enable the Weather API and create an API key in Google Cloud. Export the key in the shell where Compose will run, then start the service using the development override (which builds from the local source):
 
 ```sh
 export GOOGLE_WEATHER_API_KEY="your-key"
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 The key is interpolated by Docker Compose at startup and passed to the application container. Do not commit it to `.env`, source control, or the image. To change the single configured location, export `LOCATION_LATITUDE` and `LOCATION_LONGITUDE`; the default is Kraków.
 
-The service immediately fetches hourly (240 hour) and daily (10 day) forecasts, then refreshes every four hours. It runs database cleanup daily and also cleans expired rows after each successful refresh. SQLite is stored in the persistent `weather-data` Compose volume. UTC is the default timezone; set `tz` in the feed URL to use another IANA timezone.
+The base `docker-compose.yml` pulls the published GHCR image. The development override builds from the local source. The service immediately fetches hourly (240 hour) and daily (10 day) forecasts, then refreshes every four hours. It runs database cleanup daily and also cleans expired rows after each successful refresh. SQLite is stored in the persistent `weather-data` Compose volume. UTC is the default timezone; set `tz` in the feed URL to use another IANA timezone.
 
 ## Feed
 
@@ -38,19 +38,4 @@ The feed includes local dates starting two calendar days before today, where sto
 | `LOCATION_LATITUDE` | `50.0647` | Configured location latitude |
 | `LOCATION_LONGITUDE` | `19.9450` | Configured location longitude |
 | `PORT` | `8080` | Host port published by Compose |
-
-## GitHub Actions deployment
-
-The **Test** workflow compiles the source and runs the unit and route tests on pull requests and pushes to `main`. After a successful `main` push, **Build** publishes an ARM64 image to GHCR with the commit SHA and `latest` tags.
-
-**Deploy** is a manual workflow. Configure these GitHub Actions secrets:
-
-| Secret | Value |
-| --- | --- |
-| `SSH_PRIVATE_KEY` | Private key authorized on the deployment host |
-| `REMOTE_HOST` | Hostname or IP of the deployment host |
-| `REMOTE_USERNAME` | SSH username |
-| `REMOTE_PORT` | SSH port; optional, defaults to `22` |
-| `GOOGLE_WEATHER_API_KEY` | Google Weather API key |
-
-The remote host must have `/home/<REMOTE_USERNAME>/infra/compose/weather-ics.yml` and a versions file at `/home/<REMOTE_USERNAME>/infra/compose/versions/weather-ics`. The compose file should reference the GHCR image using `WEATHER_ICS_VERSION`, pass through `GOOGLE_WEATHER_API_KEY` with Compose variable interpolation, expose the service behind your proxy, and persist `/data`. Deploy streams the key over its SSH connection to the remote Compose process, without adding it to the command line or a Compose file. The workflow writes the selected ref's commit SHA to the versions file and runs `docker compose up -d --wait`.
+| `WEATHER_ICS_VERSION` | `latest` | GHCR image tag; Deploy sets this to the selected commit SHA |

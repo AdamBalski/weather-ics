@@ -60,32 +60,32 @@ def fold_ics(line: str) -> str:
 
 
 def render_description(rows, tz: ZoneInfo, html_mode: bool) -> str:
-    headers = ("Time", "Weather", "Temp °C", "Rain %", "Precip mm", "Cloud %")
+    headers = ("HH", "T", "R%", "mm", "CC%")
     data = []
     for row in rows:
         start = datetime.fromisoformat(row["valid_at"].replace("Z", "+00:00")).astimezone(tz)
         data.append(
             (
-                start.strftime("%H:%M"),
-                f"{icon_for(row, start.hour)} {row['condition_text'] or 'Unknown'}",
-                display_number(row["temperature_c"]),
-                display_number(row["precipitation_probability"]),
+                f"{icon_for(row, start.hour)}{start:%H}",
+                f"{display_number(row['temperature_c'])}°C" if row["temperature_c"] is not None else "—",
+                f"{display_number(row['precipitation_probability'])}%" if row["precipitation_probability"] is not None else "—",
                 display_number(row["precipitation_mm"], 1),
-                display_number(row["cloud_cover"]),
+                f"{display_number(row['cloud_cover'])}%" if row["cloud_cover"] is not None else "—",
             )
         )
+    legend = "HH = local hour; T = temperature; R% = precipitation probability; mm = expected precipitation; CC% = cloud cover."
     if html_mode:
         out = ['<table border="1"><thead><tr>']
         out.extend(f"<th>{html.escape(header)}</th>" for header in headers)
         out.append("</tr></thead><tbody>")
         for row in data:
             out.append("<tr>" + "".join(f"<td>{html.escape(value)}</td>" for value in row) + "</tr>")
-        out.append("</tbody></table><br>" + html.escape(SOURCE_CREDIT))
+        out.append("</tbody></table><p>" + html.escape(legend) + "</p><p>" + html.escape(SOURCE_CREDIT) + "</p>")
         return "".join(out)
     widths = [max(len(headers[i]), *(len(row[i]) for row in data)) if data else len(headers[i]) for i in range(len(headers))]
-    lines = [" | ".join(headers[i].ljust(widths[i]) for i in range(len(headers)))]
-    lines.append("-+-".join("-" * width for width in widths))
-    lines.extend(" | ".join(row[i].ljust(widths[i]) for i in range(len(headers))) for row in data)
+    lines = ["  ".join(headers[i].ljust(widths[i]) for i in range(len(headers))).rstrip()]
+    lines.extend("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))).rstrip() for row in data)
+    lines.extend(("", legend))
     lines.extend(("", SOURCE_CREDIT))
     return "\n".join(lines)
 
@@ -133,7 +133,8 @@ def build_calendar(tz_name: str, html_mode: bool) -> str:
         day = date.fromisoformat(day_key)
         next_day = day + timedelta(days=1)
         description = render_description(rows, tz, html_mode)
-        uid = f"{day_key}-{LATITUDE:.6f}-{LONGITUDE:.6f}@weather-ics"
+        format_id = "html" if html_mode else "raw"
+        uid = f"{day_key}-{LATITUDE:.6f}-{LONGITUDE:.6f}-{format_id}@weather-ics"
         lines.extend(
             [
                 "BEGIN:VEVENT",

@@ -1,7 +1,6 @@
 services:
   weather-calendar:
-    build: .
-    image: weather-calendar:latest
+    image: ghcr.io/adambalski/weather-ics:${WEATHER_ICS_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"

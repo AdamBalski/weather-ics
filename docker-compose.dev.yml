@@ -1,0 +1,4 @@
+services:
+  weather-calendar:
+    build: .
+    image: weather-calendar:local
