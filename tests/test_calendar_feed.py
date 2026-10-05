@@ -27,8 +27,9 @@ class CalendarFeedTests(unittest.TestCase):
         self.assertIn("CC% = cloud cover", raw)
         self.assertIn(calendar_feed.SOURCE_CREDIT, raw)
         self.assertIn("<table", html)
-        self.assertIn("Light rain", html)
-        self.assertTrue(html.endswith(calendar_feed.SOURCE_CREDIT))
+        self.assertIn("<td>🌧️08</td><td>12°C</td><td>40%</td>", html)
+        self.assertIn("CC% = cloud cover", html)
+        self.assertIn(calendar_feed.SOURCE_CREDIT, html)
 
     def test_calendar_calculates_range_and_combined_rain_risk(self):
         rows = []
