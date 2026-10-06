@@ -55,12 +55,38 @@ def initialize_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS daily_date_idx
                 ON daily_forecasts(location, local_date, issued_at);
+            CREATE TABLE IF NOT EXISTS service_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         # Keep existing Compose volumes usable when upgrading from the first schema.
         daily_columns = {row["name"] for row in db.execute("PRAGMA table_info(daily_forecasts)")}
         if "time_zone" not in daily_columns:
             db.execute("ALTER TABLE daily_forecasts ADD COLUMN time_zone TEXT")
+
+
+def latest_successful_refresh() -> datetime | None:
+    state_key = f"last_successful_refresh:{LOCATION_ID}"
+    with connect() as db:
+        row = db.execute(
+            "SELECT value FROM service_state WHERE key=?", (state_key,)
+        ).fetchone()
+        if row:
+            return datetime.fromisoformat(row["value"])
+
+        # Use existing forecast snapshots when upgrading a database created
+        # before successful refresh times were stored explicitly.
+        row = db.execute(
+            """SELECT MAX(issued_at) AS issued_at FROM (
+                   SELECT issued_at FROM hourly_forecasts WHERE location=?
+                   UNION ALL
+                   SELECT issued_at FROM daily_forecasts WHERE location=?
+               )""",
+            (LOCATION_ID, LOCATION_ID),
+        ).fetchone()
+        return datetime.fromisoformat(row["issued_at"]) if row and row["issued_at"] else None
 
 
 def cleanup() -> None:

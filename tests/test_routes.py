@@ -1,6 +1,7 @@
 import json
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -65,6 +66,13 @@ class RouteTests(unittest.TestCase):
                 body = response.read().decode("utf-8")
         render.assert_called_once_with("UTC", "compact")
         self.assertIn("BEGIN:VCALENDAR", body)
+
+    def test_refresh_delay_uses_remaining_configured_interval(self):
+        now = datetime(2026, 5, 3, 12, tzinfo=timezone.utc)
+        last_refresh = now - timedelta(hours=3)
+        self.assertEqual(server.refresh_delay(last_refresh, now), 60 * 60)
+        self.assertEqual(server.refresh_delay(now - timedelta(hours=5), now), 0)
+        self.assertEqual(server.refresh_delay(None, now), 0)
 
 
 if __name__ == "__main__":

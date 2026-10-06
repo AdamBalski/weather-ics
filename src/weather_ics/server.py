@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from .calendar_feed import get_calendar, invalidate_cache
 from .config import DEFAULT_TIMEZONE, PORT, REFRESH_SECONDS
-from .database import cleanup, initialize_db
+from .database import cleanup, initialize_db, latest_successful_refresh, now_utc
 from .provider import ingest
 
 LOG = logging.getLogger("weather_ics")
@@ -18,8 +18,19 @@ INDEX_HTML = Path(__file__).resolve().parent.parent / "static" / "index.html"
 SUPPORTED_TIMEZONES = ["UTC", *sorted(available_timezones() - {"UTC"}, key=str.casefold)]
 
 
+def refresh_delay(last_refresh, now=None) -> float:
+    if last_refresh is None:
+        return 0.0
+    now = now or now_utc()
+    age = (now - last_refresh).total_seconds()
+    return max(0.0, REFRESH_SECONDS - age)
+
+
 def maintenance_loop() -> None:
-    next_refresh = 0.0
+    initial_delay = refresh_delay(latest_successful_refresh())
+    if initial_delay:
+        LOG.info("Skipping startup forecast refresh; next refresh in %.0f seconds", initial_delay)
+    next_refresh = time.time() + initial_delay
     next_cleanup = 0.0
     while True:
         now = time.time()
@@ -28,9 +39,10 @@ def maintenance_loop() -> None:
                 ingest()
                 cleanup()
                 invalidate_cache()
+                next_refresh = time.time() + refresh_delay(latest_successful_refresh())
             except Exception:
                 LOG.exception("Forecast refresh failed")
-            next_refresh = now + REFRESH_SECONDS
+                next_refresh = time.time() + REFRESH_SECONDS
         if now >= next_cleanup:
             try:
                 cleanup()

@@ -13,7 +13,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
 The key is interpolated by Docker Compose at startup and passed to the application container. Do not commit it to `.env`, source control, or the image. To change the single configured location, export `LOCATION_LATITUDE` and `LOCATION_LONGITUDE`; the default is Kraków.
 
-The base `docker-compose.yml` pulls the published GHCR image. The development override builds from the local source. The service immediately fetches hourly (240 hour) and daily (10 day) forecasts, then refreshes every four hours. It runs database cleanup daily and also cleans expired rows after each successful refresh. SQLite is stored in the persistent `weather-data` Compose volume. UTC is the default timezone; set `tz` in the feed URL to use another IANA timezone.
+The base `docker-compose.yml` pulls the published GHCR image. The development override builds from the local source. The service fetches hourly (240 hour) and daily (10 day) forecasts on startup only if there is no successful refresh in the last four hours. Otherwise it waits until four hours have elapsed since that refresh, then continues on the same interval. It runs database cleanup daily and after each successful refresh. SQLite is stored in the persistent `weather-data` Compose volume. UTC is the default timezone; set `tz` in the feed URL to use another IANA timezone.
 
 ## Feed
 

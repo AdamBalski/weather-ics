@@ -133,6 +133,11 @@ def ingest() -> None:
                VALUES (?, ?, ?, ?, ?, ?)""",
             daily_rows,
         )
+        db.execute(
+            """INSERT INTO service_state (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+            (f"last_successful_refresh:{LOCATION_ID}", issued_at),
+        )
     LOG.info("Stored %d hourly and %d daily forecasts", len(hourly_rows), len(daily_rows))
     from .calendar_feed import invalidate_cache
 
