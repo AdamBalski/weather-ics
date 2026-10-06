@@ -1,5 +1,4 @@
 import html
-import math
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -68,7 +67,8 @@ def fold_ics(line: str) -> str:
     return "\r\n".join(parts)
 
 
-def render_description(rows, tz: ZoneInfo, format_name: str) -> str:
+def render_description(rows, tz: ZoneInfo, format_name: str, daytime_qpf_mm: float | None = None) -> str:
+    daytime_qpf = f"Daytime QPF (07:00–19:00 at location): {display_number(daytime_qpf_mm, 1)} mm."
     if format_name == "compact":
         headers = ("HH", "T", "R", "C", "mm")
         data = []
@@ -84,11 +84,11 @@ def render_description(rows, tz: ZoneInfo, format_name: str) -> str:
                     display_number(row["precipitation_mm"], 1),
                 )
             )
-        legend = "HH = local hour; T = temperature in °C; R = precipitation probability (🕛 0%, 🕚 92–100%); C = cloud cover; mm = expected precipitation."
+        legend = "HH = local hour; T = temperature in °C; R = hourly precipitation probability (🕛 0%, 🕚 92–100%); C = cloud cover; mm = hourly precipitation."
         widths = [max(len(headers[i]), *(len(row[i]) for row in data)) if data else len(headers[i]) for i in range(len(headers))]
         lines = ["  ".join(headers[i].ljust(widths[i]) for i in range(len(headers))).rstrip()]
         lines.extend("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))).rstrip() for row in data)
-        lines.extend(("", legend, "", SOURCE_CREDIT))
+        lines.extend(("", daytime_qpf, legend, "", SOURCE_CREDIT))
         return "\n".join(lines)
 
     html_mode = format_name == "html"
@@ -105,19 +105,19 @@ def render_description(rows, tz: ZoneInfo, format_name: str) -> str:
                 f"{display_number(row['cloud_cover'])}%" if row["cloud_cover"] is not None else "—",
             )
         )
-    legend = "HH = local hour; T = temperature; R% = precipitation probability; mm = expected precipitation; CC% = cloud cover."
+    legend = "HH = local hour; T = temperature; R% = hourly precipitation probability; mm = hourly precipitation; CC% = cloud cover. The title uses Google's daytime probability."
     if html_mode:
         out = ['<table border="1"><thead><tr>']
         out.extend(f"<th>{html.escape(header)}</th>" for header in headers)
         out.append("</tr></thead><tbody>")
         for row in data:
             out.append("<tr>" + "".join(f"<td>{html.escape(value)}</td>" for value in row) + "</tr>")
-        out.append("</tbody></table><p>" + html.escape(legend) + "</p><p>" + html.escape(SOURCE_CREDIT) + "</p>")
+        out.append("</tbody></table><p>" + html.escape(daytime_qpf) + "</p><p>" + html.escape(legend) + "</p><p>" + html.escape(SOURCE_CREDIT) + "</p>")
         return "".join(out)
     widths = [max(len(headers[i]), *(len(row[i]) for row in data)) if data else len(headers[i]) for i in range(len(headers))]
     lines = ["  ".join(headers[i].ljust(widths[i]) for i in range(len(headers))).rstrip()]
     lines.extend("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))).rstrip() for row in data)
-    lines.extend(("", legend))
+    lines.extend(("", daytime_qpf, legend))
     lines.extend(("", SOURCE_CREDIT))
     return "\n".join(lines)
 
@@ -131,7 +131,8 @@ def build_calendar(tz_name: str, format_name: str) -> str:
     for row in hourly:
         instant = datetime.fromisoformat(row["valid_at"].replace("Z", "+00:00"))
         by_day.setdefault(instant.astimezone(tz).date().isoformat(), []).append(row)
-    daily_map = {row["local_date"]: row for row in daily if row["time_zone"] == tz_name}
+    daily_by_date = {row["local_date"]: row for row in daily}
+    daily_map = {key: row for key, row in daily_by_date.items() if row["time_zone"] == tz_name}
     if not by_day:
         raise RuntimeError("No forecast data is available yet; try again shortly")
 
@@ -142,15 +143,12 @@ def build_calendar(tz_name: str, format_name: str) -> str:
     for day_key in day_keys:
         rows = by_day[day_key]
         daily_row = daily_map.get(day_key)
+        daily_period = daily_by_date.get(day_key)
         temps = [row["temperature_c"] for row in rows if row["temperature_c"] is not None]
         low = daily_row["low_c"] if daily_row and daily_row["low_c"] is not None else (min(temps) if temps else None)
         high = daily_row["high_c"] if daily_row and daily_row["high_c"] is not None else (max(temps) if temps else None)
-        probabilities = []
-        for row in rows:
-            local = datetime.fromisoformat(row["valid_at"].replace("Z", "+00:00")).astimezone(tz)
-            if 8 <= local.hour <= 19 and row["precipitation_probability"] is not None:
-                probabilities.append(max(0.0, min(100.0, row["precipitation_probability"])) / 100.0)
-        rain = round(100 * (1 - math.prod(1 - probability for probability in probabilities))) if probabilities else None
+        rain = daily_period["daytime_precipitation_probability"] if daily_period else None
+        daytime_qpf_mm = daily_period["daytime_precipitation_mm"] if daily_period else None
         daytime_rows = [row for row in rows if row["is_daytime"] == 1]
         candidates = daytime_rows or rows
         priority = {"THUNDERSTORM": 5, "SNOW": 4, "SLEET": 4, "RAIN": 3, "DRIZZLE": 3, "FOG": 2}
@@ -167,7 +165,7 @@ def build_calendar(tz_name: str, format_name: str) -> str:
             title = f"{icon_for(significant, local_hour)}⬇️{display_number(low)}°C⬆️{display_number(high)}°C<{display_number(rain)}%>"
         day = date.fromisoformat(day_key)
         next_day = day + timedelta(days=1)
-        description = render_description(rows, tz, format_name)
+        description = render_description(rows, tz, format_name, daytime_qpf_mm)
         uid = f"{day_key}-{LATITUDE:.6f}-{LONGITUDE:.6f}-{format_name}@weather-ics"
         lines.extend(
             [

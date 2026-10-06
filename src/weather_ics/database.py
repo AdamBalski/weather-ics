@@ -51,6 +51,8 @@ def initialize_db() -> None:
                 time_zone TEXT,
                 low_c REAL,
                 high_c REAL,
+                daytime_precipitation_probability REAL,
+                daytime_precipitation_mm REAL,
                 UNIQUE(location, issued_at, local_date)
             );
             CREATE INDEX IF NOT EXISTS daily_date_idx
@@ -59,12 +61,23 @@ def initialize_db() -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS google_api_call_metrics (
+                hour_start TEXT NOT NULL,
+                call_type TEXT NOT NULL,
+                calls INTEGER NOT NULL DEFAULT 0,
+                successes INTEGER NOT NULL DEFAULT 0,
+                failures INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (hour_start, call_type)
+            );
             """
         )
         # Keep existing Compose volumes usable when upgrading from the first schema.
         daily_columns = {row["name"] for row in db.execute("PRAGMA table_info(daily_forecasts)")}
         if "time_zone" not in daily_columns:
             db.execute("ALTER TABLE daily_forecasts ADD COLUMN time_zone TEXT")
+        for column in ("daytime_precipitation_probability", "daytime_precipitation_mm"):
+            if column not in daily_columns:
+                db.execute(f"ALTER TABLE daily_forecasts ADD COLUMN {column} REAL")
 
 
 def latest_successful_refresh() -> datetime | None:
@@ -87,6 +100,21 @@ def latest_successful_refresh() -> datetime | None:
             (LOCATION_ID, LOCATION_ID),
         ).fetchone()
         return datetime.fromisoformat(row["issued_at"]) if row and row["issued_at"] else None
+
+
+def record_google_api_call(call_type: str, started_at: datetime, succeeded: bool) -> None:
+    hour_start = iso_utc(started_at.replace(minute=0, second=0, microsecond=0))
+    with connect() as db:
+        db.execute(
+            """INSERT INTO google_api_call_metrics
+                   (hour_start, call_type, calls, successes, failures)
+               VALUES (?, ?, 1, ?, ?)
+               ON CONFLICT(hour_start, call_type) DO UPDATE SET
+                   calls=calls+1,
+                   successes=successes+excluded.successes,
+                   failures=failures+excluded.failures""",
+            (hour_start, call_type, int(succeeded), int(not succeeded)),
+        )
 
 
 def cleanup() -> None:

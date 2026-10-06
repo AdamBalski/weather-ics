@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 
 from .config import API_ROOT, LATITUDE, LOCATION_ID, LONGITUDE
-from .database import connect, iso_utc, now_utc
+from .database import connect, iso_utc, now_utc, record_google_api_call
 
 LOG = logging.getLogger("weather_ics")
 
@@ -18,13 +18,22 @@ def google_get(endpoint: str, params: dict[str, str]) -> dict:
     query = {**params, "key": key}
     url = f"{API_ROOT}/{endpoint}?{urllib.parse.urlencode(query)}"
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    started_at = now_utc()
+    succeeded = False
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
+            payload = json.load(response)
+            succeeded = True
+            return payload
     except urllib.error.HTTPError as exc:
         # The request URL contains the API key; never include it in a log message.
         detail = exc.read().decode("utf-8", errors="replace")[:500]
         raise RuntimeError(f"Google Weather API returned HTTP {exc.code}: {detail}") from exc
+    finally:
+        try:
+            record_google_api_call(endpoint, started_at, succeeded)
+        except Exception:
+            LOG.exception("Could not record Google API call metric")
 
 
 def number(value: object) -> float | None:
@@ -65,14 +74,16 @@ def ingest() -> None:
         if not token:
             break
 
-    daily_payload = google_get(
-        "forecast/days:lookup",
-        {
-            "location.latitude": str(LATITUDE),
-            "location.longitude": str(LONGITUDE),
-            "days": "10",
-        },
-    )
+    daily_params = {
+        "location.latitude": str(LATITUDE),
+        "location.longitude": str(LONGITUDE),
+        "days": "10",
+        "pageSize": "10",
+    }
+    daily_payload = google_get("forecast/days:lookup", daily_params)
+    if daily_payload.get("nextPageToken"):
+        LOG.error("Daily forecast returned nextPageToken despite days=10 and pageSize=10; ignoring it")
+    daily_pages = daily_payload.get("forecastDays", [])
     forecast_timezone = (daily_payload.get("timeZone") or {}).get("id")
     hourly_rows = []
     for item in hours:
@@ -101,12 +112,14 @@ def ingest() -> None:
         )
 
     daily_rows = []
-    for item in daily_payload.get("forecastDays", []):
+    for item in daily_pages:
         display_date = item.get("displayDate") or {}
         try:
             local_date = f"{int(display_date['year']):04d}-{int(display_date['month']):02d}-{int(display_date['day']):02d}"
         except (KeyError, TypeError, ValueError):
             continue
+        daytime_precipitation = (item.get("daytimeForecast") or {}).get("precipitation") or {}
+        daytime_probability = daytime_precipitation.get("probability") or {}
         daily_rows.append(
             (
                 LOCATION_ID,
@@ -115,6 +128,8 @@ def ingest() -> None:
                 forecast_timezone,
                 number((item.get("minTemperature") or {}).get("degrees")),
                 number((item.get("maxTemperature") or {}).get("degrees")),
+                number(daytime_probability.get("percent")),
+                quantity_mm(daytime_precipitation.get("qpf")),
             )
         )
 
@@ -129,8 +144,9 @@ def ingest() -> None:
         )
         db.executemany(
             """INSERT OR REPLACE INTO daily_forecasts
-               (location, issued_at, local_date, time_zone, low_c, high_c)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (location, issued_at, local_date, time_zone, low_c, high_c,
+                daytime_precipitation_probability, daytime_precipitation_mm)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             daily_rows,
         )
         db.execute(

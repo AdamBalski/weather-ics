@@ -29,7 +29,15 @@ The root URL (`/`) describes the service and provides read-only URLs with copy b
 `GET /supportedTimezones` returns the full timezone list available to this service, which the root page uses to populate its timezone dropdown.
 
 
-The feed includes local dates starting two calendar days before today, where stored forecast hours are available. It stores forecast issue time separately from each hour's valid time and chooses the latest stored snapshot for each valid hour. Missing values appear as an em dash. The daily endpoint supplies low/high values when its timezone matches the requested feed timezone; otherwise, the service calculates them from that local date's hourly forecasts. Rain risk combines the available hourly precipitation probabilities for local intervals beginning 08:00 through 19:00 using the product formula in the product plan.
+The feed includes local dates starting two calendar days before today, where stored forecast hours are available. It stores forecast issue time separately from each hour's valid time and chooses the latest stored snapshot for each valid hour. Missing values appear as an em dash. The daily endpoint supplies low/high values when its timezone matches the requested feed timezone; otherwise, the service calculates them from that local date's hourly forecasts. Event rain probability uses Google's daytime probability for 07:00–19:00 at the configured location; descriptions also include Google's daytime QPF for that period. Hourly probability and amount remain available in the hourly table.
+
+Google request counts are stored in SQLite, grouped by UTC hour and endpoint, in `google_api_call_metrics`. Inspect them with:
+
+```sql
+SELECT hour_start, call_type, calls, successes, failures
+FROM google_api_call_metrics
+ORDER BY hour_start DESC, call_type;
+```
 
 ## Configuration
 

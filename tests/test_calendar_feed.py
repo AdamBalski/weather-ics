@@ -31,7 +31,7 @@ class CalendarFeedTests(unittest.TestCase):
         self.assertIn("CC% = cloud cover", html)
         self.assertIn(calendar_feed.SOURCE_CREDIT, html)
 
-    def test_calendar_calculates_range_and_combined_rain_risk(self):
+    def test_calendar_uses_daily_daytime_rain_probability_and_qpf(self):
         rows = []
         for hour in range(8, 20):
             rows.append(
@@ -49,13 +49,27 @@ class CalendarFeedTests(unittest.TestCase):
 
         with (
             patch.object(calendar_feed, "latest_hourly", return_value=rows),
-            patch.object(calendar_feed, "latest_daily", return_value=[]),
+            patch.object(
+                calendar_feed,
+                "latest_daily",
+                return_value=[
+                    {
+                        "local_date": "2026-05-03",
+                        "time_zone": "UTC",
+                        "low_c": 3.0,
+                        "high_c": 14.0,
+                        "daytime_precipitation_probability": 25.0,
+                        "daytime_precipitation_mm": 4.2,
+                    }
+                ],
+            ),
             patch.object(calendar_feed, "now_utc", return_value=datetime(2026, 5, 3, 12, tzinfo=timezone.utc)),
         ):
             result = calendar_feed.build_calendar("UTC", "raw")
 
-        # 1 - (1 - 0.1)^12 = 71.76%, rounded to 72%.
-        self.assertIn("SUMMARY:🌧️⬇️3°C⬆️14°C<72%>", result)
+        # Hourly probabilities are not combined; the daily daytime probability is used.
+        self.assertIn("SUMMARY:🌧️⬇️3°C⬆️14°C<25%>", result)
+        self.assertIn("Daytime QPF (07:00–19:00 at location): 4.2 mm.", result)
         self.assertIn("DTSTART;VALUE=DATE:20260503", result)
         self.assertIn("DTEND;VALUE=DATE:20260504", result)
         self.assertEqual(result.count("BEGIN:VEVENT"), 1)
@@ -82,7 +96,20 @@ class CalendarFeedTests(unittest.TestCase):
 
         with (
             patch.object(calendar_feed, "latest_hourly", return_value=rows),
-            patch.object(calendar_feed, "latest_daily", return_value=[]),
+            patch.object(
+                calendar_feed,
+                "latest_daily",
+                return_value=[
+                    {
+                        "local_date": "2026-05-03",
+                        "time_zone": "UTC",
+                        "low_c": 3.0,
+                        "high_c": 14.0,
+                        "daytime_precipitation_probability": 75.0,
+                        "daytime_precipitation_mm": 8.7,
+                    }
+                ],
+            ),
             patch.object(calendar_feed, "now_utc", return_value=datetime(2026, 5, 3, 12, tzinfo=timezone.utc)),
         ):
             raw = calendar_feed.build_calendar("UTC", "raw")
@@ -90,6 +117,7 @@ class CalendarFeedTests(unittest.TestCase):
 
         self.assertIn("SUMMARY:3/14°🕘", compact)
         self.assertIn("DESCRIPTION:HH  T    R  C  mm", compact)
+        self.assertIn("8.7 mm.", compact)
         self.assertIn("UID:2026-05-03-50.064700-19.945000-raw@weather-ics", raw)
         self.assertIn("UID:2026-05-03-50.064700-19.945000-compact@weather-ics", compact)
 
