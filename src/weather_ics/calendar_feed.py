@@ -8,8 +8,9 @@ from zoneinfo import ZoneInfo
 from .config import LATITUDE, LONGITUDE, SOURCE_CREDIT
 from .database import iso_utc, latest_daily, latest_hourly, now_utc
 
-FEED_CACHE: dict[tuple[str, bool], tuple[float, str]] = {}
+FEED_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 CACHE_LOCK = threading.Lock()
+CLOCK_EMOJI = ("🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚")
 
 
 def invalidate_cache() -> None:
@@ -19,6 +20,14 @@ def invalidate_cache() -> None:
 
 def display_number(value: float | None, precision: int = 0) -> str:
     return "—" if value is None else f"{value:.{precision}f}"
+
+
+def clock_for_percent(value: float | None) -> str:
+    if value is None:
+        return "—"
+    percent = max(0.0, min(100.0, value))
+    step = min(11, int(percent * 12 / 100 + 0.5))
+    return CLOCK_EMOJI[step]
 
 
 def icon_for(row, local_hour: int) -> str:
@@ -59,7 +68,30 @@ def fold_ics(line: str) -> str:
     return "\r\n".join(parts)
 
 
-def render_description(rows, tz: ZoneInfo, html_mode: bool) -> str:
+def render_description(rows, tz: ZoneInfo, format_name: str) -> str:
+    if format_name == "compact":
+        headers = ("HH", "T", "R", "C", "mm")
+        data = []
+        for row in rows:
+            start = datetime.fromisoformat(row["valid_at"].replace("Z", "+00:00")).astimezone(tz)
+            temperature = row["temperature_c"]
+            data.append(
+                (
+                    start.strftime("%H"),
+                    f"{display_number(temperature)}°" if temperature is not None else "—",
+                    clock_for_percent(row["precipitation_probability"]),
+                    clock_for_percent(row["cloud_cover"]),
+                    display_number(row["precipitation_mm"], 1),
+                )
+            )
+        legend = "HH = local hour; T = temperature in °C; R = precipitation probability (🕛 0%, 🕚 92–100%); C = cloud cover; mm = expected precipitation."
+        widths = [max(len(headers[i]), *(len(row[i]) for row in data)) if data else len(headers[i]) for i in range(len(headers))]
+        lines = ["  ".join(headers[i].ljust(widths[i]) for i in range(len(headers))).rstrip()]
+        lines.extend("  ".join(row[i].ljust(widths[i]) for i in range(len(headers))).rstrip() for row in data)
+        lines.extend(("", legend, "", SOURCE_CREDIT))
+        return "\n".join(lines)
+
+    html_mode = format_name == "html"
     headers = ("HH", "T", "R%", "mm", "CC%")
     data = []
     for row in rows:
@@ -90,7 +122,7 @@ def render_description(rows, tz: ZoneInfo, html_mode: bool) -> str:
     return "\n".join(lines)
 
 
-def build_calendar(tz_name: str, html_mode: bool) -> str:
+def build_calendar(tz_name: str, format_name: str) -> str:
     tz = ZoneInfo(tz_name)
     now = now_utc()
     hourly = latest_hourly(iso_utc(now - timedelta(hours=72)), iso_utc(now + timedelta(hours=240)))
@@ -129,12 +161,14 @@ def build_calendar(tz_name: str, html_mode: bool) -> str:
 
         significant = max(candidates, key=severity)
         local_hour = datetime.fromisoformat(significant["valid_at"].replace("Z", "+00:00")).astimezone(tz).hour
-        title = f"{icon_for(significant, local_hour)}⬇️{display_number(low)}°C⬆️{display_number(high)}°C<{display_number(rain)}%>"
+        if format_name == "compact":
+            title = f"{display_number(low)}/{display_number(high)}°{clock_for_percent(rain)}"
+        else:
+            title = f"{icon_for(significant, local_hour)}⬇️{display_number(low)}°C⬆️{display_number(high)}°C<{display_number(rain)}%>"
         day = date.fromisoformat(day_key)
         next_day = day + timedelta(days=1)
-        description = render_description(rows, tz, html_mode)
-        format_id = "html" if html_mode else "raw"
-        uid = f"{day_key}-{LATITUDE:.6f}-{LONGITUDE:.6f}-{format_id}@weather-ics"
+        description = render_description(rows, tz, format_name)
+        uid = f"{day_key}-{LATITUDE:.6f}-{LONGITUDE:.6f}-{format_name}@weather-ics"
         lines.extend(
             [
                 "BEGIN:VEVENT",
@@ -151,13 +185,13 @@ def build_calendar(tz_name: str, html_mode: bool) -> str:
     return "\r\n".join(fold_ics(line) for line in lines) + "\r\n"
 
 
-def get_calendar(tz_name: str, html_mode: bool) -> str:
-    cache_key = (tz_name, html_mode)
+def get_calendar(tz_name: str, format_name: str) -> str:
+    cache_key = (tz_name, format_name)
     with CACHE_LOCK:
         cached = FEED_CACHE.get(cache_key)
         if cached and cached[0] > time.time():
             return cached[1]
-    body = build_calendar(tz_name, html_mode)
+    body = build_calendar(tz_name, format_name)
     with CACHE_LOCK:
         FEED_CACHE[cache_key] = (time.time() + 60 * 60, body)
     return body

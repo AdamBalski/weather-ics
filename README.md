@@ -20,10 +20,11 @@ The base `docker-compose.yml` pulls the published GHCR image. The development ov
 ```text
 http://localhost:8080/calendar.ics
 http://localhost:8080/calendar.ics?tz=Europe%2FWarsaw
+http://localhost:8080/calendar.ics?tz=Europe%2FWarsaw&format=compact
 http://localhost:8080/calendar.ics?tz=Europe%2FWarsaw&format=html
 ```
 
-The root URL (`/`) describes the service and provides read-only URLs with copy buttons for both feed formats. `format` may be omitted or set to `raw`; `html` selects an HTML table in the iCalendar description. Unknown formats and invalid IANA timezones return HTTP 400. `/health` is available for container health checks.
+The root URL (`/`) describes the service and provides read-only URLs with copy buttons. `format` may be omitted or set to `raw`; `compact` uses clock emoji for rain probability and cloud cover, and `html` selects an HTML table in the iCalendar description. In compact mode, 🕛 means 0% and 🕚 represents approximately 92–100%; intermediate values round to the nearest hour step. Unknown formats and invalid IANA timezones return HTTP 400. `/health` is available for container health checks.
 
 `GET /supportedTimezones` returns the full timezone list available to this service, which the root page uses to populate its timezone dropdown.
 

@@ -43,7 +43,7 @@ class RouteTests(unittest.TestCase):
             with urlopen(f"{self.base}/calendar.ics?tz=Europe%2FWarsaw&format=html") as response:
                 body = response.read().decode("utf-8")
                 content_type = response.headers["Content-Type"]
-        render.assert_called_once_with("Europe/Warsaw", True)
+        render.assert_called_once_with("Europe/Warsaw", "html")
         self.assertIn("BEGIN:VCALENDAR", body)
         self.assertIn("text/calendar", content_type)
 
@@ -58,6 +58,13 @@ class RouteTests(unittest.TestCase):
             urlopen(f"{self.base}/calendar.ics?format=xml")
         self.assertEqual(error.exception.code, 400)
         error.exception.close()
+
+    def test_compact_format_is_accepted(self):
+        with patch.object(server, "get_calendar", return_value="BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n") as render:
+            with urlopen(f"{self.base}/calendar.ics?format=compact") as response:
+                body = response.read().decode("utf-8")
+        render.assert_called_once_with("UTC", "compact")
+        self.assertIn("BEGIN:VCALENDAR", body)
 
 
 if __name__ == "__main__":

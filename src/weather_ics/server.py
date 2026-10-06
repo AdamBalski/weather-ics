@@ -65,15 +65,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(404, "Not found\n")
         params = parse_qs(parsed.query, keep_blank_values=True)
         fmt = params.get("format", ["raw"])[0]
-        if fmt not in ("raw", "html"):
-            return self.send_text(400, "format must be raw or html\n")
+        if fmt not in ("raw", "html", "compact"):
+            return self.send_text(400, "format must be raw, html, or compact\n")
         tz_name = params.get("tz", [DEFAULT_TIMEZONE])[0]
         try:
             ZoneInfo(tz_name)
         except (ZoneInfoNotFoundError, ValueError):
             return self.send_text(400, "tz must be a valid IANA timezone, such as Europe/Warsaw\n")
         try:
-            body = get_calendar(tz_name, fmt == "html")
+            body = get_calendar(tz_name, fmt)
         except RuntimeError as exc:
             return self.send_text(503, f"{exc}\n")
         except Exception:

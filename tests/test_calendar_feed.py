@@ -17,8 +17,8 @@ class CalendarFeedTests(unittest.TestCase):
             "cloud_cover": 80,
         }
 
-        raw = calendar_feed.render_description([row], timezone.utc, html_mode=False)
-        html = calendar_feed.render_description([row], timezone.utc, html_mode=True)
+        raw = calendar_feed.render_description([row], timezone.utc, "raw")
+        html = calendar_feed.render_description([row], timezone.utc, "html")
 
         self.assertIn("HH", raw)
         self.assertIn("🌧️08", raw)
@@ -52,7 +52,7 @@ class CalendarFeedTests(unittest.TestCase):
             patch.object(calendar_feed, "latest_daily", return_value=[]),
             patch.object(calendar_feed, "now_utc", return_value=datetime(2026, 5, 3, 12, tzinfo=timezone.utc)),
         ):
-            result = calendar_feed.build_calendar("UTC", html_mode=False)
+            result = calendar_feed.build_calendar("UTC", "raw")
 
         # 1 - (1 - 0.1)^12 = 71.76%, rounded to 72%.
         self.assertIn("SUMMARY:🌧️⬇️3°C⬆️14°C<72%>", result)
@@ -60,14 +60,48 @@ class CalendarFeedTests(unittest.TestCase):
         self.assertIn("DTEND;VALUE=DATE:20260504", result)
         self.assertEqual(result.count("BEGIN:VEVENT"), 1)
 
+    def test_compact_clock_mapping_and_format_specific_uid(self):
+        self.assertEqual(calendar_feed.clock_for_percent(0), "🕛")
+        self.assertEqual(calendar_feed.clock_for_percent(8), "🕐")
+        self.assertEqual(calendar_feed.clock_for_percent(92), "🕚")
+        self.assertEqual(calendar_feed.clock_for_percent(None), "—")
+
+        rows = [
+            {
+                "valid_at": f"2026-05-03T{hour:02d}:00:00Z",
+                "condition_type": "CLOUDY",
+                "condition_text": "Cloudy",
+                "temperature_c": float(hour - 5),
+                "precipitation_probability": 10.0,
+                "precipitation_mm": 0.5,
+                "cloud_cover": 80,
+                "is_daytime": 1,
+            }
+            for hour in range(8, 20)
+        ]
+
+        with (
+            patch.object(calendar_feed, "latest_hourly", return_value=rows),
+            patch.object(calendar_feed, "latest_daily", return_value=[]),
+            patch.object(calendar_feed, "now_utc", return_value=datetime(2026, 5, 3, 12, tzinfo=timezone.utc)),
+        ):
+            raw = calendar_feed.build_calendar("UTC", "raw")
+            compact = calendar_feed.build_calendar("UTC", "compact")
+
+        self.assertIn("SUMMARY:3/14°🕘", compact)
+        self.assertIn("DESCRIPTION:HH  T    R  C  mm", compact)
+        self.assertIn("UID:2026-05-03-50.064700-19.945000-raw@weather-ics", raw)
+        self.assertIn("UID:2026-05-03-50.064700-19.945000-compact@weather-ics", compact)
+
     def test_feed_cache_is_keyed_by_timezone_and_format(self):
         calendar_feed.invalidate_cache()
-        with patch.object(calendar_feed, "build_calendar", side_effect=["raw utc", "html utc", "raw warsaw"]) as build:
-            self.assertEqual(calendar_feed.get_calendar("UTC", False), "raw utc")
-            self.assertEqual(calendar_feed.get_calendar("UTC", False), "raw utc")
-            self.assertEqual(calendar_feed.get_calendar("UTC", True), "html utc")
-            self.assertEqual(calendar_feed.get_calendar("Europe/Warsaw", False), "raw warsaw")
-        self.assertEqual(build.call_count, 3)
+        with patch.object(calendar_feed, "build_calendar", side_effect=["raw utc", "html utc", "compact utc", "raw warsaw"]) as build:
+            self.assertEqual(calendar_feed.get_calendar("UTC", "raw"), "raw utc")
+            self.assertEqual(calendar_feed.get_calendar("UTC", "raw"), "raw utc")
+            self.assertEqual(calendar_feed.get_calendar("UTC", "html"), "html utc")
+            self.assertEqual(calendar_feed.get_calendar("UTC", "compact"), "compact utc")
+            self.assertEqual(calendar_feed.get_calendar("Europe/Warsaw", "raw"), "raw warsaw")
+        self.assertEqual(build.call_count, 4)
         calendar_feed.invalidate_cache()
 
 

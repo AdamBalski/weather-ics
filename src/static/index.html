@@ -95,6 +95,15 @@
     </div>
 
     <div class="feed-pair">
+      <label for="compactUrl">Compact feed</label>
+      <p>Uses clock symbols for rain probability and cloud cover.</p>
+      <div class="feed-row">
+        <input type="text" id="compactUrl" readonly aria-label="Compact calendar feed URL">
+        <button class="secondary" type="button" data-copy="compactUrl">Copy URL</button>
+      </div>
+    </div>
+
+    <div class="feed-pair">
       <label for="htmlUrl">HTML description feed</label>
       <p>Uses an HTML table for hourly details.</p>
       <div class="feed-row">
@@ -110,6 +119,7 @@
   <script>
     const timezone = document.getElementById("timezone");
     const rawUrl = document.getElementById("rawUrl");
+    const compactUrl = document.getElementById("compactUrl");
     const htmlUrl = document.getElementById("htmlUrl");
 
     async function loadTimezones() {
@@ -133,9 +143,12 @@
     function updateFeedUrls() {
       const raw = new URL("./calendar.ics", window.location.href);
       raw.searchParams.set("tz", timezone.value);
+      const compact = new URL(raw);
+      compact.searchParams.set("format", "compact");
       const html = new URL(raw);
       html.searchParams.set("format", "html");
       rawUrl.value = raw.href;
+      compactUrl.value = compact.href;
       htmlUrl.value = html.href;
     }
 
